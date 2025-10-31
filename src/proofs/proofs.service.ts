@@ -14,6 +14,7 @@ import {
   selectTokenPoolInfo,
 } from "@lightprotocol/compressed-token";
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   getMintLen,
   ExtensionType,
@@ -285,8 +286,9 @@ export class ProofsService {
     const payerAta = getAssociatedTokenAddressSync(
       mintPublicKey,
       payer.publicKey,
-      false,
-      TOKEN_2022_PROGRAM_ID
+      false, // owner is the payer keypair, not a PDA
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
     );
     try {
       const createAtaIx = createAssociatedTokenAccountInstruction(
@@ -294,7 +296,8 @@ export class ProofsService {
         payerAta,
         payer.publicKey,
         mintPublicKey,
-        TOKEN_2022_PROGRAM_ID
+        TOKEN_2022_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
       );
       const mintIx = createMintToInstruction(
         mintPublicKey,
