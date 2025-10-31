@@ -313,7 +313,7 @@ export class ProofsService {
         instructions: [createAtaIx, mintIx],
       }).compileToV0Message();
       const tx = new VersionedTransaction(msg);
-      tx.sign([payer, ...(mintAuthority ? [mintAuthority] : [])]);
+      tx.sign([payer]);
       await sendAndConfirmTx(connection, tx);
     } catch (e: any) {
       // If ATA exists or mint already done, we can proceed; only rethrow for unexpected errors with logs
