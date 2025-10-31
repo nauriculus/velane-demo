@@ -24,6 +24,7 @@ import {
   createInitializeMetadataPointerInstruction,
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   createMintToInstruction,
 } from "@solana/spl-token";
 import {
@@ -286,12 +287,12 @@ export class ProofsService {
     const payerAta = getAssociatedTokenAddressSync(
       mintPublicKey,
       payer.publicKey,
-      false, // owner is the payer keypair, not a PDA
+      true, // allow off-curve owner (safe for keypairs and PDAs)
       TOKEN_2022_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
     try {
-      const createAtaIx = createAssociatedTokenAccountInstruction(
+      const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
         payer.publicKey,
         payerAta,
         payer.publicKey,
