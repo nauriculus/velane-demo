@@ -40,6 +40,7 @@ import { postgres_pool } from "../config/postgres.config";
 
 const RPC_ENDPOINT = process.env.SOLANA_RPC!;
 const connection: Rpc = createRpc(RPC_ENDPOINT, RPC_ENDPOINT);
+const web3Connection = new Connection(RPC_ENDPOINT, "confirmed");
 
 function loadPayer(): Keypair {
   const secret = process.env.PAYER_SECRET_BASE58;
@@ -183,22 +184,54 @@ export class ProofsService {
 
     const mintTx = new VersionedTransaction(messageV0);
     mintTx.sign([payer, mint]);
-    const mintTxId = await sendAndConfirmTx(connection, mintTx);
+    let mintTxId: string;
+    try {
+      mintTxId = await sendAndConfirmTx(connection, mintTx);
+    } catch (e: any) {
+      let logs: string[] | undefined;
+      if (e && typeof e.getLogs === "function") {
+        try {
+          logs = await e.getLogs(web3Connection);
+        } catch {}
+      }
+      return {
+        ok: false,
+        error: "MINT_TX_FAILED",
+        message: e?.message ?? String(e),
+        logs,
+      } as any;
+    }
 
     const pool = selectTokenPoolInfo(
       await getTokenPoolInfos(connection, mint.publicKey)
     );
-    const compressedTxId = await compress(
-      connection,
-      payer,
-      mint.publicKey,
-      1,
-      payer,
-      new PublicKey(payer.publicKey),
-      payer.publicKey,
-      treeInfo,
-      pool
-    );
+    let compressedTxId: string;
+    try {
+      compressedTxId = await compress(
+        connection,
+        payer,
+        mint.publicKey,
+        1,
+        payer,
+        new PublicKey(payer.publicKey),
+        payer.publicKey,
+        treeInfo,
+        pool
+      );
+    } catch (e: any) {
+      let logs: string[] | undefined;
+      if (e && typeof e.getLogs === "function") {
+        try {
+          logs = await e.getLogs(web3Connection);
+        } catch {}
+      }
+      return {
+        ok: false,
+        error: "COMPRESS_TX_FAILED",
+        message: e?.message ?? String(e),
+        logs,
+      } as any;
+    }
 
     await this.ensureTable();
     await postgres_pool.query(
