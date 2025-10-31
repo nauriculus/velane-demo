@@ -29,6 +29,7 @@ import {
   VersionedTransaction,
   PublicKey,
   Connection,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import {
   createInitializeInstruction,
@@ -115,103 +116,137 @@ export class ProofsService {
     const activeStateTrees = await connection.getStateTreeInfos();
     const treeInfo = selectStateTreeInfo(activeStateTrees);
 
-    const mint = Keypair.generate();
-    const decimals = 0;
-    const tokenMetadata: TokenMetadata = {
-      mint: mint.publicKey,
-      name: "RuntimeProof",
-      symbol: "RTPRF",
-      uri: "https://shardvell.com/proof/" + mint.publicKey,
-      additionalMetadata: [
-        ["txHash", dto.txSignature],
-        ["runtimeProofHash", dto.runtimeProofHash],
-        ["userId", dto.userId],
-        ["timestamp", String(dto.timestamp)],
-        ["runtimeId", dto.runtimeId ?? ""],
-        ["chain", "solana"],
-      ],
-    };
-
-    const mintLen = getMintLen([ExtensionType.MetadataPointer]);
-    const metadataLen = TYPE_SIZE + LENGTH_SIZE + pack(tokenMetadata).length;
-    const lamports = await connection.getMinimumBalanceForRentExemption(
-      mintLen + metadataLen
-    );
-
-    const ixs = [
-      SystemProgram.createAccount({
-        fromPubkey: payer.publicKey,
-        newAccountPubkey: mint.publicKey,
-        space: mintLen,
-        lamports,
-        programId: TOKEN_2022_PROGRAM_ID,
-      }),
-      createInitializeMetadataPointerInstruction(
-        mint.publicKey,
-        payer.publicKey,
-        mint.publicKey,
-        TOKEN_2022_PROGRAM_ID
-      ),
-      createInitializeMintInstruction(
-        mint.publicKey,
-        decimals,
-        payer.publicKey,
-        null,
-        TOKEN_2022_PROGRAM_ID
-      ),
-      createInitializeInstruction({
-        programId: TOKEN_2022_PROGRAM_ID,
+    let mintPublicKey: PublicKey;
+    let mintTxId: string | null = null;
+    const masterMintEnv = process.env.MASTER_MINT_PUBKEY;
+    if (masterMintEnv) {
+      mintPublicKey = new PublicKey(masterMintEnv);
+    } else {
+      const mint = Keypair.generate();
+      mintPublicKey = mint.publicKey;
+      const decimals = 0;
+      const tokenMetadata: TokenMetadata = {
         mint: mint.publicKey,
-        metadata: mint.publicKey,
-        name: tokenMetadata.name,
-        symbol: tokenMetadata.symbol,
-        uri: tokenMetadata.uri,
-        mintAuthority: payer.publicKey,
-        updateAuthority: payer.publicKey,
-      }),
-      await CompressedTokenProgram.createTokenPool({
-        feePayer: payer.publicKey,
-        mint: mint.publicKey,
-        tokenProgramId: TOKEN_2022_PROGRAM_ID,
-      }),
-    ];
+        name: "RuntimeProof",
+        symbol: "RTPRF",
+        uri: "https://shardvell.com/proof/" + mint.publicKey,
+        additionalMetadata: [
+          ["txHash", dto.txSignature],
+          ["runtimeProofHash", dto.runtimeProofHash],
+          ["userId", dto.userId],
+          ["timestamp", String(dto.timestamp)],
+          ["runtimeId", dto.runtimeId ?? ""],
+          ["chain", "solana"],
+        ],
+      };
 
-    const messageV0 = new TransactionMessage({
-      payerKey: payer.publicKey,
-      recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
-      instructions: ixs,
-    }).compileToV0Message();
+      const mintLen = getMintLen([ExtensionType.MetadataPointer]);
+      const metadataLen = TYPE_SIZE + LENGTH_SIZE + pack(tokenMetadata).length;
+      const lamports = await connection.getMinimumBalanceForRentExemption(
+        mintLen + metadataLen
+      );
 
-    const mintTx = new VersionedTransaction(messageV0);
-    mintTx.sign([payer, mint]);
-    let mintTxId: string;
-    try {
-      mintTxId = await sendAndConfirmTx(connection, mintTx);
-    } catch (e: any) {
-      let logs: string[] | undefined;
-      if (e && typeof e.getLogs === "function") {
-        try {
-          logs = await e.getLogs(web3Connection);
-        } catch {}
+      const ixs = [
+        SystemProgram.createAccount({
+          fromPubkey: payer.publicKey,
+          newAccountPubkey: mint.publicKey,
+          space: mintLen,
+          lamports,
+          programId: TOKEN_2022_PROGRAM_ID,
+        }),
+        createInitializeMetadataPointerInstruction(
+          mint.publicKey,
+          payer.publicKey,
+          mint.publicKey,
+          TOKEN_2022_PROGRAM_ID
+        ),
+        createInitializeMintInstruction(
+          mint.publicKey,
+          decimals,
+          payer.publicKey,
+          null,
+          TOKEN_2022_PROGRAM_ID
+        ),
+        createInitializeInstruction({
+          programId: TOKEN_2022_PROGRAM_ID,
+          mint: mint.publicKey,
+          metadata: mint.publicKey,
+          name: tokenMetadata.name,
+          symbol: tokenMetadata.symbol,
+          uri: tokenMetadata.uri,
+          mintAuthority: payer.publicKey,
+          updateAuthority: payer.publicKey,
+        }),
+      ];
+
+      const messageV0 = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+        instructions: ixs,
+      }).compileToV0Message();
+
+      const mintTx = new VersionedTransaction(messageV0);
+      mintTx.sign([payer, mint]);
+      try {
+        mintTxId = await sendAndConfirmTx(connection, mintTx);
+      } catch (e: any) {
+        let logs: string[] | undefined;
+        if (e && typeof e.getLogs === "function") {
+          try {
+            logs = await e.getLogs(web3Connection);
+          } catch {}
+        }
+        return {
+          ok: false,
+          error: "MINT_TX_FAILED",
+          message: e?.message ?? String(e),
+          logs,
+        } as any;
       }
-      return {
-        ok: false,
-        error: "MINT_TX_FAILED",
-        message: e?.message ?? String(e),
-        logs,
-      } as any;
     }
 
-    const pool = selectTokenPoolInfo(
-      await getTokenPoolInfos(connection, mint.publicKey)
-    );
+    let poolInfos = await getTokenPoolInfos(connection, mintPublicKey);
+    let pool = selectTokenPoolInfo(poolInfos);
+    if (!pool) {
+      const createPoolIx = await CompressedTokenProgram.createTokenPool({
+        feePayer: payer.publicKey,
+        mint: mintPublicKey,
+        tokenProgramId: TOKEN_2022_PROGRAM_ID,
+      });
+      const messageV0 = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+        instructions: [createPoolIx],
+      }).compileToV0Message();
+      const tx = new VersionedTransaction(messageV0);
+      tx.sign([payer]);
+      try {
+        await sendAndConfirmTx(connection, tx);
+      } catch (e: any) {
+        let logs: string[] | undefined;
+        if (e && typeof e.getLogs === "function") {
+          try {
+            logs = await e.getLogs(web3Connection);
+          } catch {}
+        }
+        return {
+          ok: false,
+          error: "CREATE_POOL_FAILED",
+          message: e?.message ?? String(e),
+          logs,
+        } as any;
+      }
+      poolInfos = await getTokenPoolInfos(connection, mintPublicKey);
+      pool = selectTokenPoolInfo(poolInfos);
+    }
     let compressedTxId: string;
     try {
+      const amount = Math.max(1, Math.min(50, Number(dto.batchCount ?? 1)));
       compressedTxId = await compress(
         connection,
         payer,
-        mint.publicKey,
-        1,
+        mintPublicKey,
+        amount,
         payer,
         new PublicKey(payer.publicKey),
         payer.publicKey,
@@ -233,6 +268,31 @@ export class ProofsService {
       } as any;
     }
 
+    try {
+      const memoProgramId = new PublicKey(
+        "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+      );
+      const memoPayload = JSON.stringify({
+        t: "rtp",
+        m: mintPublicKey.toBase58(),
+        c: compressedTxId,
+        h: dto.runtimeProofHash,
+      });
+      const memoIx = new TransactionInstruction({
+        keys: [],
+        programId: memoProgramId,
+        data: Buffer.from(memoPayload, "utf8"),
+      });
+      const messageV0 = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+        instructions: [memoIx],
+      }).compileToV0Message();
+      const memoTx = new VersionedTransaction(messageV0);
+      memoTx.sign([payer]);
+      await sendAndConfirmTx(connection, memoTx);
+    } catch (_) {}
+
     await this.ensureTable();
     await postgres_pool.query(
       `INSERT INTO runtime_proofs (
@@ -246,8 +306,8 @@ export class ProofsService {
         dto.userId,
         dto.runtimeId ?? null,
         dto.timestamp,
-        mint.publicKey.toBase58(),
-        mintTxId,
+        mintPublicKey.toBase58(),
+        mintTxId ?? "",
         compressedTxId,
         "solana",
       ]
@@ -255,8 +315,8 @@ export class ProofsService {
 
     return {
       ok: true,
-      mint: mint.publicKey.toBase58(),
-      mintTxId,
+      mint: mintPublicKey.toBase58(),
+      mintTxId: mintTxId ?? "",
       compressedTxId,
       metadata: {
         txHash: dto.txSignature,

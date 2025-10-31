@@ -5,4 +5,5 @@ export class InitProofDto {
   timestamp!: number;
   runtimeId?: string;
   userId!: string;
+  batchCount?: number;
 }
