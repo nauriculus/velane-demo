@@ -62,7 +62,7 @@ function loadMintAuthority(): Keypair {
 
 @Injectable()
 export class ProofsService {
-  private async ensureTable() {
+  /*private async ensureTable() {
     const sql = `
       CREATE TABLE IF NOT EXISTS runtime_proofs (
         id SERIAL PRIMARY KEY,
@@ -82,10 +82,9 @@ export class ProofsService {
       CREATE INDEX IF NOT EXISTS idx_runtime_proofs_tx ON runtime_proofs(tx_signature);
     `;
     await postgres_pool.query(sql);
-  }
+  }*/
 
   async retrieveProofsByUser(userId: string) {
-    await this.ensureTable();
     const q = `
       SELECT
         tx_signature AS "txSignature",
@@ -387,7 +386,6 @@ export class ProofsService {
       await sendAndConfirmTx(connection, memoTx);
     } catch (_) {}
 
-    await this.ensureTable();
     await postgres_pool.query(
       `INSERT INTO runtime_proofs (
         tx_signature, tx_bytes_base58, runtime_proof_hash, user_id, runtime_id, timestamp_ms,
@@ -421,29 +419,5 @@ export class ProofsService {
         chain: "solana",
       },
     };
-  }
-
-  async retrieveProofsByUser(userId: string) {
-    await this.ensureTable();
-    const q = `
-      SELECT
-        tx_signature AS "txSignature",
-        tx_bytes_base58 AS "txBytesBase58",
-        runtime_proof_hash AS "runtimeProofHash",
-        user_id AS "userId",
-        runtime_id AS "runtimeId",
-        timestamp_ms AS "timestamp",
-        mint_address AS "mint",
-        mint_tx_id AS "mintTxId",
-        compressed_tx_id AS "compressedTxId",
-        chain,
-        created_at AS "createdAt"
-      FROM runtime_proofs
-      WHERE user_id = $1
-      ORDER BY created_at DESC
-      LIMIT 200
-    `;
-    const res = await postgres_pool.query(q, [userId]);
-    return { ok: true, proofs: res.rows } as any;
   }
 }
