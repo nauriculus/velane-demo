@@ -21,6 +21,9 @@ import {
   TYPE_SIZE,
   createInitializeMintInstruction,
   createInitializeMetadataPointerInstruction,
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
 } from "@solana/spl-token";
 import {
   Keypair,
@@ -240,15 +243,68 @@ export class ProofsService {
       pool = selectTokenPoolInfo(poolInfos);
     }
     let compressedTxId: string;
+
+    const amount = Math.max(1, Math.min(50, Number(dto.batchCount ?? 1)));
+    const payerAta = getAssociatedTokenAddressSync(
+      mintPublicKey,
+      payer.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
+    );
     try {
-      const amount = Math.max(1, Math.min(50, Number(dto.batchCount ?? 1)));
+      const createAtaIx = createAssociatedTokenAccountInstruction(
+        payer.publicKey,
+        payerAta,
+        payer.publicKey,
+        mintPublicKey,
+        TOKEN_2022_PROGRAM_ID
+      );
+      const mintIx = createMintToInstruction(
+        mintPublicKey,
+        payerAta,
+        payer.publicKey,
+        amount,
+        [],
+        TOKEN_2022_PROGRAM_ID
+      );
+      const msg = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: (await connection.getLatestBlockhash()).blockhash,
+        instructions: [createAtaIx, mintIx],
+      }).compileToV0Message();
+      const tx = new VersionedTransaction(msg);
+      tx.sign([payer]);
+      await sendAndConfirmTx(connection, tx);
+    } catch (e: any) {
+      // If ATA exists or mint already done, we can proceed; only rethrow for unexpected errors with logs
+      try {
+        const logs = await e?.getLogs?.(web3Connection);
+        if (logs) {
+          // swallow common "already in use" errors
+          const joined = Array.isArray(logs) ? logs.join("\n") : String(logs);
+          const isExpected =
+            /already in use|custom program error: 0x0|Account already initialized/i.test(
+              joined
+            );
+          if (!isExpected) {
+            return {
+              ok: false,
+              error: "PREPARE_ATA_OR_MINT_FAILED",
+              message: e?.message ?? String(e),
+              logs,
+            } as any;
+          }
+        }
+      } catch {}
+    }
+    try {
       compressedTxId = await compress(
         connection,
         payer,
         mintPublicKey,
         amount,
         payer,
-        new PublicKey(payer.publicKey),
+        payerAta,
         payer.publicKey,
         treeInfo,
         pool
