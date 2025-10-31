@@ -1,0 +1,6 @@
+/dist
+docker-compose.yml
+Makefile
+/node_modules
+package-lock.json
+yarn.lock
