@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import bs58 from "bs58";
+import * as bs58 from "bs58";
 import { sha256 } from "@noble/hashes/sha256";
 import {
   Rpc,
@@ -97,7 +97,12 @@ export class ProofsService {
     const txInfo = await this.confirmTx(dto.txSignature);
     if (!txInfo) return { ok: false, error: "TX_NOT_FOUND" };
 
-    const txBytes = bs58.decode(dto.txBytesBase58);
+    let txBytes: Uint8Array;
+    try {
+      txBytes = bs58.decode(dto.txBytesBase58);
+    } catch {
+      return { ok: false, error: "INVALID_TX_BYTES_BASE58" };
+    }
     const computed = this.recomputeRuntimeHash(
       txBytes,
       dto.timestamp,
