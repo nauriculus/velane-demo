@@ -53,6 +53,13 @@ function loadPayer(): Keypair {
   return Keypair.fromSecretKey(arr);
 }
 
+function loadMintAuthority(): Keypair {
+  const secret = process.env.MASTER_MINT_AUTHORITY_SECRET_BASE58;
+  if (!secret) throw new Error("MASTER_MINT_AUTHORITY_SECRET_BASE58 missing");
+  const arr = bs58.decode(secret);
+  return Keypair.fromSecretKey(arr);
+}
+
 @Injectable()
 export class ProofsService {
   private async ensureTable() {
@@ -75,6 +82,30 @@ export class ProofsService {
       CREATE INDEX IF NOT EXISTS idx_runtime_proofs_tx ON runtime_proofs(tx_signature);
     `;
     await postgres_pool.query(sql);
+  }
+
+  async retrieveProofsByUser(userId: string) {
+    await this.ensureTable();
+    const q = `
+      SELECT
+        tx_signature AS "txSignature",
+        tx_bytes_base58 AS "txBytesBase58",
+        runtime_proof_hash AS "runtimeProofHash",
+        user_id AS "userId",
+        runtime_id AS "runtimeId",
+        timestamp_ms AS "timestamp",
+        mint_address AS "mint",
+        mint_tx_id AS "mintTxId",
+        compressed_tx_id AS "compressedTxId",
+        chain,
+        created_at AS "createdAt"
+      FROM runtime_proofs
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 200
+    `;
+    const res = await postgres_pool.query(q, [userId]);
+    return { ok: true, proofs: res.rows } as any;
   }
 
   private recomputeRuntimeHash(
@@ -121,9 +152,16 @@ export class ProofsService {
 
     let mintPublicKey: PublicKey;
     let mintTxId: string | null = null;
+    let mintAuthority: Keypair | null = null;
     const masterMintEnv = process.env.MASTER_MINT_PUBKEY;
     if (masterMintEnv) {
       mintPublicKey = new PublicKey(masterMintEnv);
+      // When using a pre-existing mint, we need its mint authority to MintTo
+      try {
+        mintAuthority = loadMintAuthority();
+      } catch (e) {
+        return { ok: false, error: "MINT_AUTHORITY_MISSING" } as any;
+      }
     } else {
       const mint = Keypair.generate();
       mintPublicKey = mint.publicKey;
@@ -262,7 +300,7 @@ export class ProofsService {
       const mintIx = createMintToInstruction(
         mintPublicKey,
         payerAta,
-        payer.publicKey,
+        (mintAuthority ?? payer).publicKey,
         amount,
         [],
         TOKEN_2022_PROGRAM_ID
@@ -273,7 +311,7 @@ export class ProofsService {
         instructions: [createAtaIx, mintIx],
       }).compileToV0Message();
       const tx = new VersionedTransaction(msg);
-      tx.sign([payer]);
+      tx.sign([payer, ...(mintAuthority ? [mintAuthority] : [])]);
       await sendAndConfirmTx(connection, tx);
     } catch (e: any) {
       // If ATA exists or mint already done, we can proceed; only rethrow for unexpected errors with logs
@@ -383,5 +421,29 @@ export class ProofsService {
         chain: "solana",
       },
     };
+  }
+
+  async retrieveProofsByUser(userId: string) {
+    await this.ensureTable();
+    const q = `
+      SELECT
+        tx_signature AS "txSignature",
+        tx_bytes_base58 AS "txBytesBase58",
+        runtime_proof_hash AS "runtimeProofHash",
+        user_id AS "userId",
+        runtime_id AS "runtimeId",
+        timestamp_ms AS "timestamp",
+        mint_address AS "mint",
+        mint_tx_id AS "mintTxId",
+        compressed_tx_id AS "compressedTxId",
+        chain,
+        created_at AS "createdAt"
+      FROM runtime_proofs
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 200
+    `;
+    const res = await postgres_pool.query(q, [userId]);
+    return { ok: true, proofs: res.rows } as any;
   }
 }

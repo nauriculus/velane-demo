@@ -40,4 +40,21 @@ export class ProofsController {
       });
     }
   }
+
+  @Post("retrieve")
+  async retrieve(@Body() body: { wallet?: string }) {
+    const wallet = body?.wallet;
+    if (!wallet || typeof wallet !== "string" || wallet.length < 20) {
+      throw new BadRequestException({ ok: false, error: "INVALID_WALLET" });
+    }
+    try {
+      return await this.proofs.retrieveProofsByUser(wallet);
+    } catch (e: any) {
+      throw new InternalServerErrorException({
+        ok: false,
+        error: "INTERNAL",
+        details: e?.message ?? String(e),
+      });
+    }
+  }
 }
