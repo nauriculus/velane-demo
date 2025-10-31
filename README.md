@@ -33,9 +33,4 @@ Scale to thousands of actions without killing your budget. Full Solana performan
 ---
 
 ## Team
-**Shardvell** — building the infrastructure others will depend on  
 Contact: noah@shardvell.com
-
----
-
-Velane doesn’t ask for trust. It **commands it**.
