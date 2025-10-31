@@ -120,7 +120,7 @@ export class ProofsService {
       mint: mint.publicKey,
       name: "RuntimeProof",
       symbol: "RTPRF",
-      uri: "https://example.com/proof",
+      uri: "https://shardvell.com/proof/" + mint.publicKey,
       additionalMetadata: [
         ["txHash", dto.txSignature],
         ["runtimeProofHash", dto.runtimeProofHash],
